@@ -18,7 +18,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     ap.add_argument("--csv", required=True, help="Path to input CSV (must include 'Person Linkedin Url' column)")
     ap.add_argument("--url-column", default="Person Linkedin Url", help="CSV column containing profile URLs")
-    ap.add_argument("--out", default="outputs", help="Directory to write per-profile JSON files")
+    ap.add_argument("--out", default="outputs", help="Output directory (parent of aggregated file)")
     ap.add_argument(
         "--limit",
         type=int,
@@ -31,10 +31,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--user-data-dir", default=".pw", help="Persistent Chromium user data dir for session reuse")
     ap.add_argument(
         "--out-file",
-        default=None,
+        default="outputs/all.json",
         help=(
-            "Optional path to write a single aggregated file. When provided, per-profile files are NOT written. "
-            "If the file exists, profiles already present are skipped."
+            "Path to the single aggregated output file (default: outputs/all.json). "
+            "Per-profile files are not written. If the file exists, profiles already present are skipped."
         ),
     )
     ap.add_argument(

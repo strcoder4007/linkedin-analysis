@@ -1,13 +1,13 @@
 # LinkedIn Recent Activity Scraper
 
-Iterate over a CSV of LinkedIn profile URLs, open each profile’s `/recent-activity`, and collect the top posts’ link, content, and timestamp. By default it writes per‑profile JSON files; if you provide an aggregated output path, it writes only that single file and updates it incrementally after each profile. Shows a progress bar with `tqdm`.
+Iterate over a CSV of LinkedIn profile URLs, open each profile’s `/recent-activity`, and collect the top posts’ link, content, and timestamp. Output is always written to a single aggregated file (`outputs/all.json` by default) and it is updated incrementally after each profile completes. No per‑profile files are created. Shows a progress bar with `tqdm`.
 
 > Note: This tool interacts with LinkedIn via a real browser (Playwright). Use responsibly and in accordance with LinkedIn’s Terms of Service and applicable laws. Avoid heavy or automated scraping at scale.
 
 ## Features
 - Captures up to 3 recent posts per profile (hard cap)
-- Saves per‑profile JSON files to an output folder
-- Optional single aggregated output file (`json` array or `ndjson`); when used, per‑profile files are not created and the file is updated after each profile completes
+- Writes to a single aggregated output file (default: `outputs/all.json`), updated after each profile
+- Supports `json` (single object with `profiles` array) or `ndjson` (one JSON object per line)
 - When `--out-file` already exists, profiles already present are skipped automatically
 - Progress bar over profiles via `tqdm`
 - Uses a persistent Chromium profile so you can log in once and reuse the session
@@ -31,7 +31,7 @@ python -m playwright install chromium
 ```
 
 ## Run
-The simplest way to run the CLI from the repo:
+The simplest way to run the CLI from the repo (writes to `outputs/all.json`):
 ```bash
 python src/linkedin_analysis/cli.py --csv mini.csv
 ```
@@ -41,18 +41,18 @@ On first run, do not use `--headless` so you can sign in when prompted. A Chromi
 If you prefer module execution, ensure `src` is on `PYTHONPATH` (or install the package) and then:
 ```bash
 PYTHONPATH=src python -m linkedin_analysis --csv mini.csv
-PYTHONPATH=src python3.10 -m linkedin_analysis.cli --csv mini.csv --out-file outputs/all.json   
+PYTHONPATH=src python3.10 -m linkedin_analysis.cli --csv mini.csv
 ```
 
 ## CLI Usage
 ```text
 --csv                 Path to input CSV (must include a column of LinkedIn profile URLs)
 --url-column          CSV column name containing the profile URLs (default: "Person Linkedin Url")
---out                 Directory to write per-profile JSON files (default: outputs)
+--out                 Output directory (parent of aggregated file; default: outputs)
 --limit               Max posts per profile to collect (hard-capped at 3; default: 3)
 --headless            Run browser headless (first run should be non-headless to login)
 --user-data-dir       Persistent Chromium user data directory (default: .pw)
---out-file            Optional path to write a single aggregated output file (default: none)
+--out-file            Path to aggregated output file (default: outputs/all.json)
 --aggregate-format    Format for aggregated file: "json" | "ndjson" (default: json)
 ```
 
@@ -60,11 +60,7 @@ PYTHONPATH=src python3.10 -m linkedin_analysis.cli --csv mini.csv --out-file out
 - Minimal run (non-headless first time to sign in):
 ```bash
 python src/linkedin_analysis/cli.py --csv mini.csv
-```
-
-- Save outputs under a custom directory:
-```bash
-python src/linkedin_analysis/cli.py --csv mini.csv --out outputs
+# Writes/updates outputs/all.json by default
 ```
 
 - Collect fewer posts (still capped at 3):
@@ -77,10 +73,9 @@ python src/linkedin_analysis/cli.py --csv mini.csv --limit 2
 python src/linkedin_analysis/cli.py --csv mini.csv --headless
 ```
 
-- Write a single aggregated JSON file (array of profile objects):
+- Write to a custom aggregated JSON path (array of profile objects):
 ```bash
-python src/linkedin_analysis/cli.py --csv mini.csv --out-file outputs/all.json
-# Note: with --out-file, only outputs/all.json is written (no per-profile files)
+python src/linkedin_analysis/cli.py --csv mini.csv --out-file outputs/custom_all.json
 ```
 
 - Write newline-delimited JSON (one profile object per line):
@@ -95,21 +90,7 @@ python src/linkedin_analysis/cli.py --csv mini.csv --out-file outputs/all.ndjson
 
 ## Output Format
 
-Per‑profile files (e.g., `outputs/<slug>.json`) have the shape:
-```json
-{
-  "profile_url": "https://www.linkedin.com/in/username",
-  "posts": [
-    {
-      "link": "https://www.linkedin.com/posts/...",
-      "content": "Post text...",
-      "timestamp": "2024-08-30T10:12:00.000Z"
-    }
-  ]
-}
-```
-
-Aggregated output (when `--out-file` is provided and per‑profile files are skipped):
+Aggregated output (default behavior):
 - `json` (default): a single JSON object with a `profiles` array
 ```json
 {

@@ -22,7 +22,6 @@ from .selectors import (
 from .utils import (
     ensure_dir,
     jitter_sleep,
-    slugify_from_url,
     to_recent_activity,
     write_json,
 )
@@ -195,11 +194,12 @@ def run(
         _ensure_logged_in(page, headless=headless)
 
         HARD_LIMIT = 3
-        # Track previously scraped profiles (when aggregating) and preload aggregate content
+        # Always write to a single aggregated file (default: outputs/all.json)
+        agg_path = Path(out_file) if out_file else Path(out_dir) / "all.json"
+        # Track previously scraped profiles and preload aggregate content
         processed_urls: set[str] = set()
         all_payloads: list[dict] = []
-        agg_path = Path(out_file) if out_file else None
-        if agg_path and agg_path.exists():
+        if agg_path.exists():
             try:
                 if aggregate_format == "ndjson":
                     with agg_path.open("r", encoding="utf-8") as f:
@@ -233,40 +233,29 @@ def run(
         total = len(csv_rows)
         for idx, profile_url in enumerate(tqdm(csv_rows, desc="Profiles", unit="profile"), start=1):
             # Skip if already scraped and present in aggregate
-            if out_file and profile_url in processed_urls:
+            if profile_url in processed_urls:
                 tqdm.write(f"[{idx}/{total}] Skipping already scraped: {profile_url}")
                 continue
-            slug = slugify_from_url(profile_url)
-            out_path = f"{out_dir}/{slug}.json"
-
             # Use tqdm.write to avoid breaking the progress bar formatting
-            if out_file:
-                tqdm.write(f"[{idx}/{total}] {profile_url} → {out_file}")
-            else:
-                tqdm.write(f"[{idx}/{total}] {profile_url} → {out_path}")
+            tqdm.write(f"[{idx}/{total}] {profile_url} → {agg_path}")
 
             # Enforce hard limit of top 3 posts
             eff_limit = min(limit, HARD_LIMIT)
             posts = scrape_profile(page, profile_url, limit=eff_limit)
             payload = {"profile_url": profile_url, "posts": posts}
-            # Write per-profile only if no aggregated file is requested
-            if not out_file:
-                write_json(out_path, payload)
             all_payloads.append(payload)
 
             jitter_sleep(1.5, 3.5)
 
             # Incrementally update aggregated file after each profile
-            if out_file:
-                assert agg_path is not None
-                agg_path.parent.mkdir(parents=True, exist_ok=True)
-                if aggregate_format == "ndjson":
-                    # Append if file exists, otherwise create
-                    mode = "a" if agg_path.exists() else "w"
-                    with agg_path.open(mode, encoding="utf-8") as f:
-                        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                else:
-                    # Write whole aggregate as a single JSON object
-                    write_json(agg_path, {"profiles": all_payloads})
+            agg_path.parent.mkdir(parents=True, exist_ok=True)
+            if aggregate_format == "ndjson":
+                # Append if file exists, otherwise create
+                mode = "a" if agg_path.exists() else "w"
+                with agg_path.open(mode, encoding="utf-8") as f:
+                    f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            else:
+                # Write whole aggregate as a single JSON object
+                write_json(agg_path, {"profiles": all_payloads})
 
         context.close()
