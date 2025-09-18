@@ -29,6 +29,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--headless", action="store_true", help="Run browser headless (first run should be non-headless to login)"
     )
     ap.add_argument("--user-data-dir", default=".pw", help="Persistent Chromium user data dir for session reuse")
+    ap.add_argument(
+        "--out-file",
+        default=None,
+        help=(
+            "Optional path to write a single aggregated file. When provided, per-profile files are NOT written. "
+            "If the file exists, profiles already present are skipped."
+        ),
+    )
+    ap.add_argument(
+        "--aggregate-format",
+        choices=["json", "ndjson"],
+        default="json",
+        help=(
+            "Format for the aggregated file: 'json' writes a JSON array of profile objects; 'ndjson' writes one JSON object per line."
+        ),
+    )
     return ap.parse_args(argv)
 
 
@@ -39,7 +55,15 @@ def main(argv: list[str] | None = None) -> int:
         print("No profile URLs found.")
         return 1
     Path(ns.out).mkdir(parents=True, exist_ok=True)
-    run(urls, out_dir=ns.out, limit=ns.limit, headless=ns.headless, user_data_dir=ns.user_data_dir)
+    run(
+        urls,
+        out_dir=ns.out,
+        limit=ns.limit,
+        headless=ns.headless,
+        user_data_dir=ns.user_data_dir,
+        out_file=ns.out_file,
+        aggregate_format=ns.aggregate_format,
+    )
     return 0
 
 

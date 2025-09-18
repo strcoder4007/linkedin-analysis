@@ -7,6 +7,7 @@ import re
 
 from playwright.sync_api import Playwright, TimeoutError, sync_playwright
 from tqdm import tqdm
+from pathlib import Path
 
 from . import __version__
 from .selectors import (
@@ -176,6 +177,8 @@ def run(
     limit: int = 3,
     headless: bool = False,
     user_data_dir: str = ".pw",
+    out_file: str | None = None,
+    aggregate_format: str = "json",
 ) -> None:
     ensure_dir(out_dir)
 
@@ -192,28 +195,78 @@ def run(
         _ensure_logged_in(page, headless=headless)
 
         HARD_LIMIT = 3
+        # Track previously scraped profiles (when aggregating) and preload aggregate content
+        processed_urls: set[str] = set()
+        all_payloads: list[dict] = []
+        agg_path = Path(out_file) if out_file else None
+        if agg_path and agg_path.exists():
+            try:
+                if aggregate_format == "ndjson":
+                    with agg_path.open("r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except Exception:
+                                continue
+                            url = (obj.get("profile_url") or "").strip()
+                            if url:
+                                processed_urls.add(url)
+                else:
+                    with agg_path.open("r", encoding="utf-8") as f:
+                        obj = json.load(f)
+                    profiles = obj.get("profiles") if isinstance(obj, dict) else None
+                    if isinstance(profiles, list):
+                        for item in profiles:
+                            if isinstance(item, dict):
+                                url = (item.get("profile_url") or "").strip()
+                                if url:
+                                    processed_urls.add(url)
+                        # Preload existing aggregate for JSON mode so rewrites include it
+                        all_payloads = list(profiles)
+            except Exception:
+                # If the aggregate file is malformed, ignore and start fresh
+                processed_urls = set()
+                all_payloads = []
         total = len(csv_rows)
         for idx, profile_url in enumerate(tqdm(csv_rows, desc="Profiles", unit="profile"), start=1):
+            # Skip if already scraped and present in aggregate
+            if out_file and profile_url in processed_urls:
+                tqdm.write(f"[{idx}/{total}] Skipping already scraped: {profile_url}")
+                continue
             slug = slugify_from_url(profile_url)
             out_path = f"{out_dir}/{slug}.json"
 
             # Use tqdm.write to avoid breaking the progress bar formatting
-            tqdm.write(f"[{idx}/{total}] {profile_url} → {out_path}")
+            if out_file:
+                tqdm.write(f"[{idx}/{total}] {profile_url} → {out_file}")
+            else:
+                tqdm.write(f"[{idx}/{total}] {profile_url} → {out_path}")
 
             # Enforce hard limit of top 3 posts
             eff_limit = min(limit, HARD_LIMIT)
             posts = scrape_profile(page, profile_url, limit=eff_limit)
             payload = {"profile_url": profile_url, "posts": posts}
-            write_json(out_path, payload)
-
-            # Print extracted data to terminal
-            try:
-                tqdm.write(json.dumps(payload, ensure_ascii=False, indent=2))
-            except Exception:
-                # Fallback minimal print if encoding issues occur
-                for p in posts:
-                    tqdm.write(f"- {p.get('timestamp','')} {p.get('link','')}")
+            # Write per-profile only if no aggregated file is requested
+            if not out_file:
+                write_json(out_path, payload)
+            all_payloads.append(payload)
 
             jitter_sleep(1.5, 3.5)
+
+            # Incrementally update aggregated file after each profile
+            if out_file:
+                assert agg_path is not None
+                agg_path.parent.mkdir(parents=True, exist_ok=True)
+                if aggregate_format == "ndjson":
+                    # Append if file exists, otherwise create
+                    mode = "a" if agg_path.exists() else "w"
+                    with agg_path.open(mode, encoding="utf-8") as f:
+                        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                else:
+                    # Write whole aggregate as a single JSON object
+                    write_json(agg_path, {"profiles": all_payloads})
 
         context.close()
