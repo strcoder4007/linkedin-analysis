@@ -260,8 +260,32 @@ def filter_payload(
         for post in posts:
             if not isinstance(post, dict):
                 continue
+            link = (post.get("link") or "").strip()
             content = (post.get("content") or "").strip()
             timestamp = (post.get("timestamp") or "").strip()
+
+            # Rule 0: Must have link, content, and timestamp
+            missing = []
+            if not link:
+                missing.append("link")
+            if not content:
+                missing.append("content")
+            if not timestamp:
+                missing.append("timestamp")
+            if missing:
+                print(
+                    f"[trace] Profile={profile_url} SKIP (missing {','.join(missing)}) link={link}",
+                    file=sys.stderr,
+                )
+                continue
+
+            # Rule 1: Recency (<= 14 days old)
+            if "https://www.linkedin.com/posts" not in link:
+                print(
+                    f"[trace] Profile={profile_url} SKIP (link not linkedin posts) link={link}",
+                    file=sys.stderr,
+                )
+                continue
 
             # Rule 1: Recency (<= 14 days old)
             if not within_two_weeks(timestamp, now=now):
@@ -272,12 +296,6 @@ def filter_payload(
                 continue
 
             # Rule 2: Topic relevance (AI OR Real Estate)
-            if not content:
-                print(
-                    f"[trace] Profile={profile_url} SKIP (empty content) link={post.get('link','')}",
-                    file=sys.stderr,
-                )
-                continue
 
             key = content[:5000]
             if key in relevance_cache:

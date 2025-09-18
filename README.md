@@ -150,3 +150,27 @@ python scripts/filter_posts.py --input outputs/all.json --output outputs/filtere
 ### Notes
 - Prints trace lines to stderr indicating which profile each post was analyzed under and why posts were kept or dropped.
 - If a timestamp cannot be parsed, the post is kept (conservative) and then filtered by relevance.
+
+## Export CSV (after filtering)
+After you have `outputs/filtered.json` from the filter step, you can export a spreadsheet-friendly CSV summarizing the latest post per profile.
+
+### Run
+```bash
+# Requires outputs/filtered.json
+python scripts/export_table_csv.py --input outputs/filtered.json --output outputs/filtered.csv
+```
+
+### Output columns
+- `Profile`: Excel/Sheets `HYPERLINK` formula to the profile URL with a readable name derived from the URL slug.
+- `Latest Post`: First kept post’s content (truncated to 160 chars by default).
+- `Timestamp`: The post’s timestamp string from the JSON.
+- `Post Link`: `HYPERLINK` formula to the post URL.
+
+### Options
+```text
+--input, -i     Path to filtered JSON (default: outputs/filtered.json)
+--output, -o    Path to write CSV (default: outputs/filtered.csv)
+--max-chars     Max characters for post snippet (default: 160; 0 = unlimited)
+```
+
+Note: The filter currently omits profiles with no kept posts, so such rows will not appear in the CSV.
