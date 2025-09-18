@@ -1,0 +1,2 @@
+# Runtime dependencies for the LinkedIn scraper
+playwright>=1.41,<2.0

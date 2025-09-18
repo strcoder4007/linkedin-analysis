@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+import json
+import sys
+from typing import List, Dict
+import re
+
+from playwright.sync_api import Playwright, TimeoutError, sync_playwright
+
+from . import __version__
+from .selectors import (
+    POST_CONTAINER,
+    MENU_TRIGGER,
+    MENUITEM_COPY_LINK_ROLE_NAME,
+    POST_CONTENT_PRIMARY,
+    POST_CONTENT_FALLBACK,
+    POST_TIME_EL_PRIMARY,
+    POST_TIME_CONTAINER_FALLBACK,
+)
+from .utils import (
+    ensure_dir,
+    jitter_sleep,
+    slugify_from_url,
+    to_recent_activity,
+    write_json,
+)
+
+
+def _click_copy_link(page, post) -> str | None:
+    # Open menu
+    trigger = post.locator(MENU_TRIGGER)
+    if trigger.count() == 0:
+        return None
+    try:
+        trigger.first.scroll_into_view_if_needed()
+        trigger.first.click(timeout=4000)
+    except TimeoutError:
+        return None
+
+    # Click the "Copy link to post" menu item (menu is page-level)
+    try:
+        page.get_by_role("menuitem", name=MENUITEM_COPY_LINK_ROLE_NAME).first.click(timeout=4000)
+    except TimeoutError:
+        # try text locator fallback
+        try:
+            page.locator("text='Copy link to post'").first.click(timeout=3000)
+        except TimeoutError:
+            return None
+
+    # Read from clipboard
+    try:
+        link = page.evaluate("navigator.clipboard.readText()")
+        return (link or "").strip() or None
+    except Exception:
+        return None
+
+
+def _extract_content(post) -> str:
+    for sel in (POST_CONTENT_PRIMARY, POST_CONTENT_FALLBACK):
+        loc = post.locator(sel)
+        if loc.count() > 0:
+            try:
+                # Expand "See more" if present within content
+                see_more = post.get_by_role("button", name=re.compile(r"see more", re.I))
+                if see_more.count():
+                    see_more.first.click(timeout=1500)
+            except Exception:
+                pass
+            try:
+                return loc.first.inner_text(timeout=4000).strip()
+            except Exception:
+                continue
+    return ""
+
+
+def _extract_timestamp(post) -> str:
+    # Prefer machine-readable datetime
+    loc = post.locator(POST_TIME_EL_PRIMARY)
+    if loc.count():
+        try:
+            dt = loc.first.get_attribute("datetime")
+            if dt:
+                return dt
+        except Exception:
+            pass
+    # Fallback to visible text
+    loc2 = post.locator(POST_TIME_CONTAINER_FALLBACK)
+    if loc2.count():
+        try:
+            return loc2.first.inner_text(timeout=3000).strip()
+        except Exception:
+            pass
+    return ""
+
+
+def _collect_top_posts_from_page(page, limit: int) -> List[Dict[str, str]]:
+    """Collect data from the top-N posts only, without continuous scrolling.
+
+    Attempts to ensure at least N posts are present by performing minimal scrolls,
+    then processes only the first N containers exactly once.
+    """
+    posts: List[Dict[str, str]] = []
+    seen_links = set()
+
+    # Ensure at least `limit` posts are present (minimal scrolling only)
+    for _ in range(4):
+        containers = page.locator(POST_CONTAINER)
+        if containers.count() >= limit:
+            break
+        page.mouse.wheel(0, 2000)
+        jitter_sleep(0.6, 1.0)
+
+    containers = page.locator(POST_CONTAINER)
+    top_n = min(containers.count(), limit)
+    for i in range(top_n):
+        post = containers.nth(i)
+        try:
+            post.scroll_into_view_if_needed()
+        except Exception:
+            pass
+
+        link = _click_copy_link(page, post)
+        content = _extract_content(post)
+        timestamp = _extract_timestamp(post)
+
+        if not link and timestamp == "" and content == "":
+            continue
+
+        if link and link in seen_links:
+            continue
+        if link:
+            seen_links.add(link)
+
+        posts.append({
+            "link": link or "",
+            "content": content,
+            "timestamp": timestamp,
+        })
+
+        jitter_sleep(0.3, 0.8)
+
+    return posts
+
+
+def _ensure_logged_in(page, headless: bool) -> None:
+    # Try to open feed and detect login
+    page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+    is_login = False
+    try:
+        is_login = page.locator("input#username").count() > 0
+    except Exception:
+        pass
+    if is_login and not headless:
+        print("Sign in to LinkedIn in the opened browser, then press Enter here…", file=sys.stderr)
+        try:
+            input()
+        except EOFError:
+            pass
+
+
+def scrape_profile(page, base_profile_url: str, limit: int) -> List[Dict[str, str]]:
+    ra_url = to_recent_activity(base_profile_url)
+    page.goto(ra_url, wait_until="domcontentloaded")
+    # Wait for at least one potential container or gracefully continue
+    try:
+        page.locator(POST_CONTAINER).first.wait_for(state="visible", timeout=8000)
+    except TimeoutError:
+        return []
+    return _collect_top_posts_from_page(page, limit=limit)
+
+
+def run(
+    csv_rows: List[str],
+    out_dir: str,
+    limit: int = 5,
+    headless: bool = False,
+    user_data_dir: str = ".pw",
+) -> None:
+    ensure_dir(out_dir)
+
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=user_data_dir,
+            headless=headless,
+            viewport={"width": 1280, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context.grant_permissions(["clipboard-read", "clipboard-write"], origin="https://www.linkedin.com")
+        page = context.new_page()
+
+        _ensure_logged_in(page, headless=headless)
+
+        HARD_LIMIT = 5
+        for idx, profile_url in enumerate(csv_rows, start=1):
+            slug = slugify_from_url(profile_url)
+            out_path = f"{out_dir}/{slug}.json"
+
+            print(f"[{idx}/{len(csv_rows)}] {profile_url} → {out_path}")
+
+            # Enforce hard limit of top 5 posts
+            eff_limit = HARD_LIMIT
+            posts = scrape_profile(page, profile_url, limit=eff_limit)
+            payload = {"profile_url": profile_url, "posts": posts}
+            write_json(out_path, payload)
+
+            # Print extracted data to terminal
+            try:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            except Exception:
+                # Fallback minimal print if encoding issues occur
+                for p in posts:
+                    print(f"- {p.get('timestamp','')} {p.get('link','')}")
+
+            jitter_sleep(1.5, 3.5)
+
+        context.close()
