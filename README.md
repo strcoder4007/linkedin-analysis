@@ -115,3 +115,38 @@ Aggregated output (default behavior):
 
 ## Legal & Ethical
 Scraping may be subject to the website’s Terms of Service and local regulations. Use responsibly. Do not share credentials or commit secrets/data to the repository.
+
+## Filter Posts (after scraping)
+Use the post-filtering script only after you have scraped and generated `outputs/all.json` via the scraper above.
+
+### What it does
+- Keeps only posts from the last 14 days (exactly 2 weeks is kept).
+- Keeps only posts relevant to AI, Real Estate, or AI in Real Estate using the DeepSeek LLM (falls back to a keyword heuristic if no API key).
+- Omits profiles that end up with zero kept posts from the output.
+
+### Setup
+1) Create a `.env` (not committed) from the provided template and add your DeepSeek key:
+```bash
+cp .env.example .env
+echo "DEEPSEEK_API_KEY=YOUR_KEY" >> .env
+```
+
+### Run
+```bash
+# Requires outputs/all.json to exist first
+python scripts/filter_posts.py --input outputs/all.json --output outputs/filtered.json
+```
+
+### Options
+```text
+--input, -i     Path to aggregated input JSON (default: outputs/all.json)
+--output, -o    Path to write filtered JSON (default: outputs/filtered.json)
+--model         DeepSeek model name (env: DEEPSEEK_MODEL; default: deepseek-chat)
+--base-url      DeepSeek API base (env: DEEPSEEK_BASE_URL; default: https://api.deepseek.com)
+--no-llm        Disable DeepSeek calls and use keyword heuristic only
+--no-dotenv     Do not read .env on startup
+```
+
+### Notes
+- Prints trace lines to stderr indicating which profile each post was analyzed under and why posts were kept or dropped.
+- If a timestamp cannot be parsed, the post is kept (conservative) and then filtered by relevance.
