@@ -6,6 +6,7 @@ from typing import List, Dict
 import re
 
 from playwright.sync_api import Playwright, TimeoutError, sync_playwright
+from tqdm import tqdm
 
 from . import __version__
 from .selectors import (
@@ -172,7 +173,7 @@ def scrape_profile(page, base_profile_url: str, limit: int) -> List[Dict[str, st
 def run(
     csv_rows: List[str],
     out_dir: str,
-    limit: int = 5,
+    limit: int = 3,
     headless: bool = False,
     user_data_dir: str = ".pw",
 ) -> None:
@@ -190,26 +191,28 @@ def run(
 
         _ensure_logged_in(page, headless=headless)
 
-        HARD_LIMIT = 5
-        for idx, profile_url in enumerate(csv_rows, start=1):
+        HARD_LIMIT = 3
+        total = len(csv_rows)
+        for idx, profile_url in enumerate(tqdm(csv_rows, desc="Profiles", unit="profile"), start=1):
             slug = slugify_from_url(profile_url)
             out_path = f"{out_dir}/{slug}.json"
 
-            print(f"[{idx}/{len(csv_rows)}] {profile_url} → {out_path}")
+            # Use tqdm.write to avoid breaking the progress bar formatting
+            tqdm.write(f"[{idx}/{total}] {profile_url} → {out_path}")
 
-            # Enforce hard limit of top 5 posts
-            eff_limit = HARD_LIMIT
+            # Enforce hard limit of top 3 posts
+            eff_limit = min(limit, HARD_LIMIT)
             posts = scrape_profile(page, profile_url, limit=eff_limit)
             payload = {"profile_url": profile_url, "posts": posts}
             write_json(out_path, payload)
 
             # Print extracted data to terminal
             try:
-                print(json.dumps(payload, ensure_ascii=False, indent=2))
+                tqdm.write(json.dumps(payload, ensure_ascii=False, indent=2))
             except Exception:
                 # Fallback minimal print if encoding issues occur
                 for p in posts:
-                    print(f"- {p.get('timestamp','')} {p.get('link','')}")
+                    tqdm.write(f"- {p.get('timestamp','')} {p.get('link','')}")
 
             jitter_sleep(1.5, 3.5)
 

@@ -19,7 +19,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--csv", required=True, help="Path to input CSV (must include 'Person Linkedin Url' column)")
     ap.add_argument("--url-column", default="Person Linkedin Url", help="CSV column containing profile URLs")
     ap.add_argument("--out", default="outputs", help="Directory to write per-profile JSON files")
-    ap.add_argument("--limit", type=int, default=5, help="Max posts per profile to collect (hard-capped at 5)")
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="Max posts per profile to collect (hard-capped at 3)",
+    )
     ap.add_argument(
         "--headless", action="store_true", help="Run browser headless (first run should be non-headless to login)"
     )
